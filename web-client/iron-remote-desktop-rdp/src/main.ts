@@ -58,6 +58,17 @@ export function enableCredssp(enable: boolean): Extension {
 }
 
 /**
+ * Send an empty password in the Client Info PDU once CredSSP has completed.
+ *
+ * The RDCleanPath proxy terminates TLS with the server, so it can read the
+ * Client Info PDU, while CredSSP already delivered the credentials encrypted
+ * end to end. Without CredSSP, the password is still sent.
+ */
+export function omitPasswordAfterCredssp(enable: boolean): Extension {
+    return new Extension('omit_password_after_credssp', enable);
+}
+
+/**
  * Allow unencrypted Standard RDP Security over a trusted RDCleanPath transport.
  *
  * Enabling this disables TLS and CredSSP protocol negotiation. Use it only when

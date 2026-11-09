@@ -8,6 +8,7 @@ mod display_data;
 mod early_capabilities;
 mod entra;
 mod license_exchange;
+mod password_after_credssp;
 #[cfg(feature = "remote-guard")]
 mod remote_guard;
 

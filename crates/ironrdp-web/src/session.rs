@@ -97,6 +97,7 @@ struct SessionBuilderInner {
 
     use_display_control: bool,
     enable_credssp: bool,
+    omit_password_after_credssp: bool,
     enable_standard_rdp_security: bool,
     enable_server_pointer: bool,
     legacy_graphics: bool,
@@ -143,6 +144,7 @@ impl Default for SessionBuilderInner {
 
             use_display_control: false,
             enable_credssp: true,
+            omit_password_after_credssp: false,
             enable_standard_rdp_security: false,
             enable_server_pointer: true,
             legacy_graphics: false,
@@ -292,6 +294,9 @@ impl iron_remote_desktop::SessionBuilder for SessionBuilder {
             |kdc_proxy_url: String| { self.0.borrow_mut().kdc_proxy_url = Some(kdc_proxy_url) };
             |display_control: bool| { self.0.borrow_mut().use_display_control = display_control };
             |enable_credssp: bool| { self.0.borrow_mut().enable_credssp = enable_credssp };
+            |omit_password_after_credssp: bool| {
+                self.0.borrow_mut().omit_password_after_credssp = omit_password_after_credssp;
+            };
             |enable_standard_rdp_security: bool| {
                 self.0.borrow_mut().enable_standard_rdp_security = enable_standard_rdp_security;
             };
@@ -556,6 +561,7 @@ impl iron_remote_desktop::SessionBuilder for SessionBuilder {
         }
 
         let use_display_control = self.0.borrow().use_display_control;
+        let omit_password_after_credssp = self.0.borrow().omit_password_after_credssp;
 
         let (connection_result, ws) = connect(ConnectParams {
             ws,
@@ -572,6 +578,7 @@ impl iron_remote_desktop::SessionBuilder for SessionBuilder {
             printer_driver_name,
             computer_name: client_name.clone(),
             use_display_control,
+            omit_password_after_credssp,
         })
         .await?;
 
@@ -1661,6 +1668,7 @@ struct ConnectParams {
     /// `computer_name` when constructing the `Rdpdr` processor.
     computer_name: String,
     use_display_control: bool,
+    omit_password_after_credssp: bool,
 }
 
 fn default_printer_driver_name() -> String {
@@ -1711,6 +1719,7 @@ async fn connect(
         printer_driver_name,
         computer_name,
         use_display_control,
+        omit_password_after_credssp,
     }: ConnectParams,
 ) -> Result<(connector::ConnectionResult, WebSocket), IronError> {
     let mut framed = ironrdp_futures::LocalFuturesFramed::new(ws);
@@ -1719,6 +1728,10 @@ async fn connect(
     let dummy_client_addr = core::net::SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 33899));
 
     let mut connector = ClientConnector::new(config, dummy_client_addr);
+
+    if omit_password_after_credssp {
+        connector = connector.with_password_omitted_after_credssp();
+    }
 
     if let Some(clipboard_backend) = clipboard_backend {
         connector.attach_static_channel(CliprdrClient::new(Box::new(clipboard_backend)));

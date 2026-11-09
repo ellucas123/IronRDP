@@ -430,6 +430,10 @@ pub struct ClientConnector {
     pub auto_reconnect_cookie: Option<ServerAutoReconnect>,
     /// Password cookie from a Server Redirection PDU, sent in the Client Info PDU.
     redirection_password_cookie: Option<Vec<u8>>,
+    /// Set via [`ClientConnector::with_password_omitted_after_credssp`].
+    omit_password_after_credssp: bool,
+    /// Whether the connector advanced past [`ClientConnectorState::Credssp`].
+    credssp_completed: bool,
     /// Start of the in-flight connect-time bandwidth measurement window.
     ///
     /// Set when the server's Bandwidth Measure Start arrives, and only when the
@@ -469,6 +473,8 @@ impl ClientConnector {
             server_multitransport_flags: None,
             auto_reconnect_cookie: None,
             redirection_password_cookie: None,
+            omit_password_after_credssp: false,
+            credssp_completed: false,
             connect_time_bw_started_at: None,
             connect_time_bw_bytes: 0,
             remote_guard: false,
@@ -701,6 +707,20 @@ impl ClientConnector {
     #[must_use]
     pub fn with_redirection_password_cookie(mut self, cookie: Vec<u8>) -> Self {
         self.redirection_password_cookie = Some(cookie);
+        self
+    }
+
+    /// Send an empty password in the Client Info PDU once CredSSP has completed.
+    ///
+    /// CredSSP already delegates the credentials encrypted under the key negotiated by its authentication package ([MS-CSSP] 2.2.1 "TSRequest").
+    /// The Client Info PDU ([MS-RDPBCGR] 2.2.1.11.1.1 "Info Packet (TS_INFO_PACKET)") is protected by TLS alone, so a proxy that terminates TLS with the server, such as an RDCleanPath proxy, can read the password in it.
+    /// Without CredSSP, the configured password is still sent.
+    ///
+    /// [MS-CSSP]: https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-cssp/
+    /// [MS-RDPBCGR]: https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-rdpbcgr/
+    #[must_use]
+    pub fn with_password_omitted_after_credssp(mut self) -> Self {
+        self.omit_password_after_credssp = true;
         self
     }
 
@@ -1614,6 +1634,7 @@ impl Sequence for ClientConnector {
                 if self.remote_guard && !self.remote_guard_ready {
                     return Err(general_err!("RCG cannot continue without the live CredSSP context"));
                 }
+                self.credssp_completed = true;
                 (
                     Written::Nothing,
                     ClientConnectorState::BasicSettingsExchangeSendInitial { selected_protocol },
@@ -1781,7 +1802,7 @@ impl Sequence for ClientConnector {
             } => {
                 debug!("Secure Settings Exchange");
 
-                let client_info = create_client_info_pdu(
+                let mut client_info = create_client_info_pdu(
                     &self.config,
                     &self.client_addr,
                     self.auto_reconnect_cookie.as_ref(),
@@ -1789,6 +1810,10 @@ impl Sequence for ClientConnector {
                     self.entra_auth,
                     self.remote_guard,
                 );
+
+                if self.omit_password_after_credssp && self.credssp_completed {
+                    client_info.client_info.credentials.password.clear();
+                }
 
                 debug!(message = ?client_info, "Send");
 
